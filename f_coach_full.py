@@ -88,7 +88,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # Configuração
 # ─────────────────────────────────────────────────────────────────────────────
 
-APP_VERSION = "8.5-forex-volume-safe"
+APP_VERSION = "8.6-perfis-ia-local-groq"
 ET = ZoneInfo("America/New_York")
 LOCAL_TZ = ZoneInfo("America/Maceio")
 
@@ -157,6 +157,7 @@ ALERTS_SENT_PATH = DATA_DIR / "f_coach_alerts_sent_v7.json"
 GATES_CACHE_PATH = DATA_DIR / "f_coach_context_gates_v81.json"
 
 def _get_secret_or_env(name: str, default: str = "") -> str:
+    """Lê segredo do Streamlit Cloud quando disponível; caso contrário usa variável de ambiente."""
     try:
         return str(st.secrets.get(name, os.getenv(name, default)))
     except Exception:
@@ -164,6 +165,13 @@ def _get_secret_or_env(name: str, default: str = "") -> str:
 
 TELEGRAM_TOKEN = _get_secret_or_env("F_COACH_TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = _get_secret_or_env("F_COACH_TELEGRAM_CHAT_ID")
+OLLAMA_BASE_URL_DEFAULT = _get_secret_or_env("F_COACH_OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL_DEFAULT = _get_secret_or_env("F_COACH_OLLAMA_MODEL", "llama3.1:8b")
+GROQ_MODEL_DEFAULT = _get_secret_or_env("F_COACH_GROQ_MODEL", "llama-3.1-8b-instant")
+OPENAI_MODEL_DEFAULT = _get_secret_or_env("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_BASE_URL_DEFAULT = _get_secret_or_env("OPENAI_BASE_URL", "https://api.openai.com/v1")
+GROQ_API_KEY_DEFAULT = _get_secret_or_env("GROQ_API_KEY")
+OPENAI_API_KEY_DEFAULT = _get_secret_or_env("OPENAI_API_KEY")
 
 Action = Literal["COMPRAR", "VENDER", "AGUARDAR", "SAIR · PROTEGER"]
 
@@ -2046,8 +2054,8 @@ def call_remote_copilot(provider: str, model: str, api_key: str, base_url: str, 
     user = json.dumps({"pergunta": question, "snapshot": snap, "posicoes_abertas": trade_context}, ensure_ascii=False, default=str)
     try:
         if provider == "Ollama local":
-            url = (base_url or "http://localhost:11434").rstrip("/") + "/api/chat"
-            payload = {"model": model or "llama3.1", "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}], "stream": False}
+            url = (base_url or OLLAMA_BASE_URL_DEFAULT).rstrip("/") + "/api/chat"
+            payload = {"model": model or OLLAMA_MODEL_DEFAULT, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}], "stream": False}
             resp = requests.post(url, json=payload, timeout=60)
             if not resp.ok:
                 return False, resp.text
@@ -2055,12 +2063,12 @@ def call_remote_copilot(provider: str, model: str, api_key: str, base_url: str, 
         if provider in {"OpenAI compatível", "Groq"}:
             if provider == "Groq":
                 url = "https://api.groq.com/openai/v1/chat/completions"
-                key = api_key or os.getenv("GROQ_API_KEY", "")
-                model = model or "llama-3.3-70b-versatile"
+                key = api_key or GROQ_API_KEY_DEFAULT
+                model = model or GROQ_MODEL_DEFAULT
             else:
-                url = (base_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")).rstrip("/") + "/chat/completions"
-                key = api_key or os.getenv("OPENAI_API_KEY", "")
-                model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+                url = (base_url or OPENAI_BASE_URL_DEFAULT).rstrip("/") + "/chat/completions"
+                key = api_key or OPENAI_API_KEY_DEFAULT
+                model = model or OPENAI_MODEL_DEFAULT
             if not key:
                 return False, "Chave de API ausente. Use variável de ambiente ou campo de chave na interface."
             payload = {"model": model, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}], "temperature": 0.2, "max_tokens": 700}
@@ -2871,7 +2879,7 @@ def render_details(r: CoachReport, ml: MLReport, opinions: list[AgentOpinion], w
         with tabs[4]: st.json(asdict(r.data_health))
 
 def main() -> None:
-    st.set_page_config(page_title="F-Coach V8.4 Fechado Cache Safe", layout="wide")
+    st.set_page_config(page_title="F-Coach V8.6 Perfis IA", layout="wide")
     st.title(f"F-Coach Full V{APP_VERSION}")
     st.caption("Motor elaborado, tela simples: decisão, motivo, risco e contexto. Não executa ordens.")
 
@@ -2901,9 +2909,37 @@ def main() -> None:
         live = st.toggle("Atualização automática", value=False, help="Desligado por padrão para evitar reruns pesados na abertura.")
         refresh_seconds = st.slider("Atualizar a cada", 60, 900, 300, step=60)
         st.header("Motor")
-        model_kind = st.selectbox("ML", ["Auto Ensemble", "Random Forest", "Extra Trees", "Gradient Boosting", "Logístico"], index=4, help="Logístico abre mais rápido. Use Auto Ensemble quando quiser maior robustez, mas ele é pesado.")
-        run_ml = st.toggle("Rodar ML/Conformal agora", value=False, help="Desligado por padrão: a abertura fica rápida. Ligue para treinar ML, conformal e Bayes com base no ML.")
-        max_ml_assets = st.slider("Máximo de ativos com ML por rodada", 1, 6, 1, help="Evita treinar vários modelos em muitos ativos ao mesmo tempo.")
+        execution_profile = st.radio(
+            "Perfil de execução",
+            ["Deploy leve", "Local completo"],
+            index=0,
+            help="Deploy leve prioriza abertura rápida. Local completo usa Auto Ensemble e copiloto local/Groq com mais recursos.",
+        )
+        if execution_profile == "Deploy leve":
+            default_model_kind = "Logístico"
+            default_run_ml = False
+            default_max_ml_assets = 1
+        else:
+            default_model_kind = "Auto Ensemble"
+            default_run_ml = True
+            default_max_ml_assets = 2
+        model_options = ["Auto Ensemble", "Random Forest", "Extra Trees", "Gradient Boosting", "Logístico"]
+        model_kind = st.selectbox(
+            "ML",
+            model_options,
+            index=model_options.index(default_model_kind),
+            help="Logístico abre mais rápido; Auto Ensemble é mais robusto para uso local, mas pode demorar.",
+        )
+        run_ml = st.toggle(
+            "Rodar ML/Conformal agora",
+            value=default_run_ml,
+            help="No deploy leve começa desligado. No local completo começa ligado, mas limitado pelo número máximo de ativos.",
+        )
+        max_ml_assets = st.slider(
+            "Máximo de ativos com ML por rodada",
+            1, 6, default_max_ml_assets,
+            help="Evita treinar vários modelos em muitos ativos ao mesmo tempo.",
+        )
         strictness = st.slider("Rigor", 0.0, 1.0, 0.65, step=0.05)
         bayes_prior_profile = st.selectbox(
             "Prior Bayes contextual",
@@ -2953,24 +2989,42 @@ def main() -> None:
             st.caption(summarize_directed_goal(directed_goal))
 
         st.header("Copiloto IA")
-        ai_provider = st.selectbox("Provedor", ["Heurístico local", "OpenAI compatível", "Groq", "Ollama local"], index=0)
-        ai_model = st.text_input("Modelo", value={"Heurístico local": "", "OpenAI compatível": os.getenv("OPENAI_MODEL", "gpt-4o-mini"), "Groq": "llama-3.3-70b-versatile", "Ollama local": "llama3.1"}.get(ai_provider, ""))
-        ai_base_url = st.text_input("Base URL", value="http://localhost:11434" if ai_provider == "Ollama local" else os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1") if ai_provider == "OpenAI compatível" else "")
-        ai_api_key = st.text_input("API key opcional", value="", type="password", help="Também aceita OPENAI_API_KEY ou GROQ_API_KEY no ambiente.")
+        default_provider = "Ollama local" if execution_profile == "Local completo" else "Heurístico local"
+        provider_options = ["Heurístico local", "Ollama local", "Groq", "OpenAI compatível"]
+        ai_provider = st.selectbox("Provedor", provider_options, index=provider_options.index(default_provider))
+        default_model_by_provider = {
+            "Heurístico local": "",
+            "Ollama local": OLLAMA_MODEL_DEFAULT,
+            "Groq": GROQ_MODEL_DEFAULT,
+            "OpenAI compatível": OPENAI_MODEL_DEFAULT,
+        }
+        ai_model = st.text_input("Modelo", value=default_model_by_provider.get(ai_provider, ""))
+        default_base_url = OLLAMA_BASE_URL_DEFAULT if ai_provider == "Ollama local" else OPENAI_BASE_URL_DEFAULT if ai_provider == "OpenAI compatível" else ""
+        ai_base_url = st.text_input("Base URL", value=default_base_url)
+        default_key = GROQ_API_KEY_DEFAULT if ai_provider == "Groq" else OPENAI_API_KEY_DEFAULT if ai_provider == "OpenAI compatível" else ""
+        ai_api_key = st.text_input("API key opcional", value=default_key, type="password", help="Também aceita GROQ_API_KEY, OPENAI_API_KEY ou st.secrets no deploy.")
+        if st.button("Testar copiloto IA"):
+            test_snap = {
+                "suggestion": "AGUARDAR", "score": 0.0, "reversal_risk": "BAIXO",
+                "session": market_session().name, "ml_quality": np.nan, "ml_probability": np.nan,
+                "trend": "teste",
+            }
+            with st.spinner("Testando copiloto IA..."):
+                ans = copilot_reply(ai_provider, ai_model, ai_api_key, ai_base_url, "Responda apenas: Copiloto F-Coach funcionando.", test_snap, "")
+            if "indisponível" in ans.lower() or "falha" in ans.lower():
+                st.warning(ans)
+            else:
+                st.success(ans)
         st.header("Alertas")
         alerts_enabled = st.toggle("Telegram em alta convicção", value=False)
         if alerts_enabled and not (TELEGRAM_TOKEN and TELEGRAM_CHAT_ID):
             st.warning("Configure F_COACH_TELEGRAM_TOKEN e F_COACH_TELEGRAM_CHAT_ID.")
         if st.button("Testar Telegram agora"):
-            ok, status = send_telegram_alert(
-                "Teste do F-Coach: Telegram configurado e funcionando."
-            )
+            ok, status = send_telegram_alert("Teste do F-Coach: Telegram configurado e funcionando.")
             if ok:
                 st.success(f"Telegram OK: {status}")
             else:
                 st.error(f"Telegram falhou: {status}")
-
-
         if st.button("Atualizar agora"):
             safe_clear_cache(fetch, fetch_market_news, walk_forward_backtest, learned_context_gates)
             st.rerun()
