@@ -156,8 +156,14 @@ DECISION_LOG_PATH = DATA_DIR / "f_coach_decisions_v7.csv"
 ALERTS_SENT_PATH = DATA_DIR / "f_coach_alerts_sent_v7.json"
 GATES_CACHE_PATH = DATA_DIR / "f_coach_context_gates_v81.json"
 
-TELEGRAM_TOKEN = os.getenv("F_COACH_TELEGRAM_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("F_COACH_TELEGRAM_CHAT_ID", "")
+def _get_secret_or_env(name: str, default: str = "") -> str:
+    try:
+        return str(st.secrets.get(name, os.getenv(name, default)))
+    except Exception:
+        return os.getenv(name, default)
+
+TELEGRAM_TOKEN = _get_secret_or_env("F_COACH_TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = _get_secret_or_env("F_COACH_TELEGRAM_CHAT_ID")
 
 Action = Literal["COMPRAR", "VENDER", "AGUARDAR", "SAIR · PROTEGER"]
 
