@@ -113,9 +113,9 @@ ASSET_TYPE = {
 }
 
 STABLE_FOREX_SYMBOLS = ["EURUSD", "USDCHF", "EURCHF"]
-DEFAULT_INDEX_SYMBOLS = ["US30", "US500", "US100"]
+DEFAULT_INDEX_SYMBOLS = ["US100", "US30", "US500"]
 DEFAULT_SYMBOLS = DEFAULT_INDEX_SYMBOLS + STABLE_FOREX_SYMBOLS
-DEFAULT_STARTUP_SYMBOLS = ["US500", "EURUSD"]  # abertura leve; demais ativos podem ser marcados depois
+DEFAULT_STARTUP_SYMBOLS = ["US100", "US30", "US500"]  # abertura padrão: futuros US100, US30 e US500
 CONTEXT_SYMBOLS = ["VIX", "DXY", "US10Y", "WTI", "XAUUSD"]
 
 FOREX_STABILITY_TIER = {
@@ -2886,7 +2886,7 @@ def main() -> None:
     with st.sidebar:
         st.header("Painel simples")
         tradable_symbols = [k for k in TICKER_MAP if k not in CONTEXT_SYMBOLS]
-        symbols = st.multiselect("Ativos", tradable_symbols, default=DEFAULT_STARTUP_SYMBOLS)
+        symbols = st.multiselect("Ativos", tradable_symbols, default=DEFAULT_STARTUP_SYMBOLS, key="ativos_futuros_us100_us30_us500_v3")
         with st.expander("Núcleo padrão", expanded=False):
             st.markdown("**Índices US:** US30, US500, US100")
             st.markdown("**Pares FX estáveis incluídos:** EURUSD, USDCHF, EURCHF")
